@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: © 2024 Tiny Tapeout
 # SPDX-License-Identifier: Apache-2.0
 
+import struct
+
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles
@@ -11,25 +13,75 @@ OUT_BYTES = 4
 COMPUTE_SLOT_BYTES = RUN_CYCLES + OUT_BYTES
 
 # Small-loop protocol payload: a[2], b[2], c0
-A_WORDS = [0x3F800000, 0x00000000]
-B_WORDS = [0x3F800000, 0x00000000]
-C0_WORD = 0x00000000
-EXPECTED_WORD = 0x3F800000
+TEST_CASES = [
+    {
+        "name": "unit",
+        "a": [0x3F800000, 0x00000000],  # [1.0, 0.0]
+        "b": [0x3F800000, 0x00000000],  # [1.0, 0.0]
+        "c0": 0x00000000,  # 0.0
+        "expected": 0x40000000,
+    },
+    {
+        "name": "mixed",
+        "a": [0x40000000, 0x3F800000],  # [2.0, 1.0]
+        "b": [0x3F000000, 0x40000000],  # [0.5, 2.0]
+        "c0": 0x00000000,  # unused by current kernel
+        "expected": 0x41840000,
+    },
+    {
+        "name": "signed",
+        "a": [0xBF800000, 0x3F000000],  # [-1.0, 0.5]
+        "b": [0x40000000, 0xC0800000],  # [2.0, -4.0]
+        "c0": 0x00000000,  # unused by current kernel
+        "expected": 0x42240000,
+    },
+]
 
 
 def word_to_le_bytes(word: int) -> list[int]:
     return [(word >> shift) & 0xFF for shift in (0, 8, 16, 24)]
 
 
-def build_frame() -> list[int]:
+def build_frame(a_words: list[int], b_words: list[int], c0_word: int) -> list[int]:
     payload = []
-    for word in A_WORDS:
+    for word in a_words:
         payload.extend(word_to_le_bytes(word))
-    for word in B_WORDS:
+    for word in b_words:
         payload.extend(word_to_le_bytes(word))
-    payload.extend(word_to_le_bytes(C0_WORD))
+    payload.extend(word_to_le_bytes(c0_word))
     assert len(payload) == FRAME_BYTES
     return payload
+
+
+def word_to_f32(word: int) -> float:
+    return struct.unpack("<f", struct.pack("<I", word & 0xFFFFFFFF))[0]
+
+
+def f32_to_word(value: float) -> int:
+    return struct.unpack("<I", struct.pack("<f", float(value)))[0]
+
+
+def f32_add_word(a_word: int, b_word: int) -> int:
+    return f32_to_word(word_to_f32(a_word) + word_to_f32(b_word))
+
+
+def f32_mul_word(a_word: int, b_word: int) -> int:
+    return f32_to_word(word_to_f32(a_word) * word_to_f32(b_word))
+
+
+def model_kernel_word(a_words: list[int], b_words: list[int]) -> int:
+    # Match the MLIR kernel:
+    #   sum_xy = x + y
+    #   mul_xy = x * y
+    #   mul_mix = sum_xy * mul_xy
+    #   acc = acc + mul_mix
+    acc_word = f32_to_word(0.0)
+    for aw, bw in zip(a_words, b_words):
+        sum_xy_word = f32_add_word(aw, bw)
+        mul_xy_word = f32_mul_word(aw, bw)
+        mul_mix_word = f32_mul_word(sum_xy_word, mul_xy_word)
+        acc_word = f32_add_word(acc_word, mul_mix_word)
+    return acc_word
 
 
 async def stream_and_collect_words(dut, stream: list[int]) -> list[int]:
@@ -55,17 +107,27 @@ def decode_le_word(samples: list[int | None], start: int) -> int | None:
     return chunk[0] | (chunk[1] << 8) | (chunk[2] << 16) | (chunk[3] << 24)
 
 
-def find_expected_near(samples: list[int | None], nominal_start: int, expected: int) -> int | None:
-    for offset in (-1, 0, 1):
-        idx = nominal_start + offset
+def find_expected_in_window(
+    samples: list[int | None], start: int, end: int, expected: int
+) -> int | None:
+    for idx in range(start, max(start, end - 3)):
         word = decode_le_word(samples, idx)
         if word == expected:
             return idx
     return None
 
 
+def window_words(samples: list[int | None], start: int, end: int) -> list[tuple[int, int]]:
+    out = []
+    for idx in range(start, max(start, end - 3)):
+        word = decode_le_word(samples, idx)
+        if word is not None:
+            out.append((idx, word))
+    return out
+
+
 @cocotb.test()
-async def test_streaming_s3fdp_wrapper(dut):
+async def test_streaming_perop_wrapper(dut):
     dut._log.info("Start")
 
     clock = Clock(dut.clk, 10, unit="us")
@@ -78,18 +140,35 @@ async def test_streaming_s3fdp_wrapper(dut):
     await ClockCycles(dut.clk, 10)
     dut.rst_n.value = 1
 
-    frame = build_frame()
-    stream = frame + ([0] * COMPUTE_SLOT_BYTES) + frame + ([0] * COMPUTE_SLOT_BYTES)
+    stream: list[int] = []
+    checks: list[tuple[str, int, int, int]] = []
+    for case in TEST_CASES:
+        frame_start = len(stream)
+        frame = build_frame(case["a"], case["b"], case["c0"])
+        stream.extend(frame)
+        stream.extend([0] * COMPUTE_SLOT_BYTES)
+
+        expected_word = case.get("expected", model_kernel_word(case["a"], case["b"]))
+        window_start = frame_start + FRAME_BYTES
+        window_end = frame_start + FRAME_BYTES + COMPUTE_SLOT_BYTES + 2
+        checks.append((case["name"], window_start, window_end, expected_word))
+
     samples = await stream_and_collect_words(dut, stream)
 
-    # For this wrapper FSM, output bytes begin one cycle after ST_OUT entry.
-    nominal_rel_start = FRAME_BYTES + RUN_CYCLES + 1
-    frame0_start = 0
-    frame1_start = FRAME_BYTES + COMPUTE_SLOT_BYTES
-    hit0 = find_expected_near(samples, frame0_start + nominal_rel_start, EXPECTED_WORD)
-    hit1 = find_expected_near(samples, frame1_start + nominal_rel_start, EXPECTED_WORD)
-
-    assert hit0 is not None, "did not observe expected first output word near nominal window"
-    assert hit1 is not None, "did not observe expected second output word near nominal window"
-
-    dut._log.info("Found expected word at sample indexes: first=%d second=%d", hit0, hit1)
+    for name, window_start, window_end, expected_word in checks:
+        hit = find_expected_in_window(samples, window_start, window_end, expected_word)
+        assert hit is not None, (
+            f"{name}: did not observe expected output word 0x{expected_word:08x} "
+            f"in sample window [{window_start}, {window_end}) ; "
+            f"decoded words={[(i, f'0x{w:08x}') for i, w in window_words(samples, window_start, window_end)]}"
+        )
+        observed = decode_le_word(samples, hit)
+        assert observed == expected_word, (
+            f"{name}: expected 0x{expected_word:08x}, got 0x{observed:08x} at sample {hit}"
+        )
+        dut._log.info(
+            "%s: expected 0x%08x observed at sample %d",
+            name,
+            expected_word,
+            hit,
+        )

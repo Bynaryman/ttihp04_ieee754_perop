@@ -9,13 +9,17 @@ module {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c2 = arith.constant 2 : index
+    %f0 = arith.constant 0.000000e+00 : f32
 
+    memref.store %f0, %c[%c0] : memref<2xf32>
     scf.for %k = %c0 to %c2 step %c1 {
       %x = memref.load %a[%k] : memref<2xf32>
       %y = memref.load %b[%k] : memref<2xf32>
       %acc = memref.load %c[%c0] : memref<2xf32>
-      %m = arith.mulf %x, %y : f32
-      %s = arith.addf %acc, %m : f32
+      %sum_xy = arith.addf %x, %y : f32
+      %mul_xy = arith.mulf %x, %y : f32
+      %mul_mix = arith.mulf %sum_xy, %mul_xy : f32
+      %s = arith.addf %acc, %mul_mix : f32
       memref.store %s, %c[%c0] : memref<2xf32>
     }
 
