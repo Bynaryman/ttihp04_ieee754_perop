@@ -1,6 +1,6 @@
 # Tiny Tapeout project information
 project:
-  title:        "Pattern-Guided Arithmetic Optimizations with MLIR"      # Project title
+  title:        "Pattern-Guided Arithmetic Optimizations with MLIR per-op"      # Project title
   author:       "L. Ledoux"      # Your name
   discord:      "binaryman"      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
   description:  "Streaming byte-fed IEEE754 per-op seq+comb accumulation core generated from MLIR for-loop."
