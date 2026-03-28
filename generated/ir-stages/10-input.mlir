@@ -15,12 +15,10 @@ module {
     scf.for %k = %c0 to %c2 step %c1 {
       %x = memref.load %a[%k] : memref<2xf32>
       %y = memref.load %b[%k] : memref<2xf32>
-      %acc = memref.load %c[%c0] : memref<2xf32>
       %sum_xy = arith.addf %x, %y : f32
       %mul_xy = arith.mulf %x, %y : f32
       %mul_mix = arith.mulf %sum_xy, %mul_xy : f32
-      %s = arith.addf %acc, %mul_mix : f32
-      memref.store %s, %c[%c0] : memref<2xf32>
+      memref.store %mul_mix, %c[%c0] : memref<2xf32>
     }
 
     %r = memref.load %c[%c0] : memref<2xf32>

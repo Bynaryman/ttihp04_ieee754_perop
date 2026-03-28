@@ -19,21 +19,21 @@ TEST_CASES = [
         "a": [0x3F800000, 0x00000000],  # [1.0, 0.0]
         "b": [0x3F800000, 0x00000000],  # [1.0, 0.0]
         "c0": 0x00000000,  # 0.0
-        "expected": 0x40000000,
+        "expected": 0x00000000,
     },
     {
         "name": "mixed",
         "a": [0x40000000, 0x3F800000],  # [2.0, 1.0]
         "b": [0x3F000000, 0x40000000],  # [0.5, 2.0]
         "c0": 0x00000000,  # unused by current kernel
-        "expected": 0x41840000,
+        "expected": 0x40C00000,
     },
     {
         "name": "signed",
         "a": [0xBF800000, 0x3F000000],  # [-1.0, 0.5]
         "b": [0x40000000, 0xC0800000],  # [2.0, -4.0]
         "c0": 0x00000000,  # unused by current kernel
-        "expected": 0x42240000,
+        "expected": 0x40E00000,
     },
 ]
 
@@ -74,14 +74,14 @@ def model_kernel_word(a_words: list[int], b_words: list[int]) -> int:
     #   sum_xy = x + y
     #   mul_xy = x * y
     #   mul_mix = sum_xy * mul_xy
-    #   acc = acc + mul_mix
-    acc_word = f32_to_word(0.0)
+    #   c[0] = mul_mix   (last iteration wins)
+    out_word = f32_to_word(0.0)
     for aw, bw in zip(a_words, b_words):
         sum_xy_word = f32_add_word(aw, bw)
         mul_xy_word = f32_mul_word(aw, bw)
         mul_mix_word = f32_mul_word(sum_xy_word, mul_xy_word)
-        acc_word = f32_add_word(acc_word, mul_mix_word)
-    return acc_word
+        out_word = mul_mix_word
+    return out_word
 
 
 async def stream_and_collect_words(dut, stream: list[int]) -> list[int]:

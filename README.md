@@ -67,12 +67,10 @@ In this artifact, we keep one compact loop-accum kernel so it fits TinyTapeout w
 scf.for %k = %c0 to %c2 step %c1 {
   %x = memref.load %a[%k] : memref<2xf32>
   %y = memref.load %b[%k] : memref<2xf32>
-  %acc = memref.load %c[%c0] : memref<2xf32>
   %sum_xy = arith.addf %x, %y : f32
   %mul_xy = arith.mulf %x, %y : f32
   %mul_mix = arith.mulf %sum_xy, %mul_xy : f32
-  %s = arith.addf %acc, %mul_mix : f32
-  memref.store %s, %c[%c0] : memref<2xf32>
+  memref.store %mul_mix, %c[%c0] : memref<2xf32>
 }
 ```
 
@@ -131,9 +129,9 @@ make -C test -B
 
 Test vectors in `test/test.py`:
 
-- `unit`: `a=[1.0, 0.0]`, `b=[1.0, 0.0]`, expected `0x40000000`
-- `mixed`: `a=[2.0, 1.0]`, `b=[0.5, 2.0]`, expected `0x41840000`
-- `signed`: `a=[-1.0, 0.5]`, `b=[2.0, -4.0]`, expected `0x42240000`
+- `unit`: `a=[1.0, 0.0]`, `b=[1.0, 0.0]`, expected `0x00000000`
+- `mixed`: `a=[2.0, 1.0]`, `b=[0.5, 2.0]`, expected `0x40C00000`
+- `signed`: `a=[-1.0, 0.5]`, `b=[2.0, -4.0]`, expected `0x40E00000`
 
 ## Related material
 
