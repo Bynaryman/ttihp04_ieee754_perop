@@ -19,21 +19,18 @@ TEST_CASES = [
         "a": [0x3F800000, 0x00000000],  # [1.0, 0.0]
         "b": [0x3F800000, 0x00000000],  # [1.0, 0.0]
         "c0": 0x00000000,  # 0.0
-        "expected": 0x00000000,
     },
     {
         "name": "mixed",
         "a": [0x40000000, 0x3F800000],  # [2.0, 1.0]
         "b": [0x3F000000, 0x40000000],  # [0.5, 2.0]
         "c0": 0x00000000,  # unused by current kernel
-        "expected": 0x40C00000,
     },
     {
         "name": "signed",
         "a": [0xBF800000, 0x3F000000],  # [-1.0, 0.5]
         "b": [0x40000000, 0xC0800000],  # [2.0, -4.0]
         "c0": 0x00000000,  # unused by current kernel
-        "expected": 0x40E00000,
     },
 ]
 
@@ -72,15 +69,12 @@ def f32_mul_word(a_word: int, b_word: int) -> int:
 def model_kernel_word(a_words: list[int], b_words: list[int]) -> int:
     # Match the MLIR kernel:
     #   sum_xy = x + y
-    #   mul_xy = x * y
-    #   mul_mix = sum_xy * mul_xy
-    #   c[0] = mul_mix   (last iteration wins)
+    #   prod = sum_xy * x
+    #   c[0] = prod   (last iteration wins)
     out_word = f32_to_word(0.0)
     for aw, bw in zip(a_words, b_words):
         sum_xy_word = f32_add_word(aw, bw)
-        mul_xy_word = f32_mul_word(aw, bw)
-        mul_mix_word = f32_mul_word(sum_xy_word, mul_xy_word)
-        out_word = mul_mix_word
+        out_word = f32_mul_word(sum_xy_word, aw)
     return out_word
 
 
@@ -148,7 +142,7 @@ async def test_streaming_perop_wrapper(dut):
         stream.extend(frame)
         stream.extend([0] * COMPUTE_SLOT_BYTES)
 
-        expected_word = case.get("expected", model_kernel_word(case["a"], case["b"]))
+        expected_word = model_kernel_word(case["a"], case["b"])
         window_start = frame_start + FRAME_BYTES
         window_end = frame_start + FRAME_BYTES + COMPUTE_SLOT_BYTES + 2
         checks.append((case["name"], window_start, window_end, expected_word))

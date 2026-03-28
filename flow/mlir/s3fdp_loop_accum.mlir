@@ -16,9 +16,8 @@ module {
       %x = memref.load %a[%k] : memref<2xf32>
       %y = memref.load %b[%k] : memref<2xf32>
       %sum_xy = arith.addf %x, %y : f32
-      %mul_xy = arith.mulf %x, %y : f32
-      %mul_mix = arith.mulf %sum_xy, %mul_xy : f32
-      memref.store %mul_mix, %c[%c0] : memref<2xf32>
+      %prod = arith.mulf %sum_xy, %x : f32
+      memref.store %prod, %c[%c0] : memref<2xf32>
     }
 
     %r = memref.load %c[%c0] : memref<2xf32>

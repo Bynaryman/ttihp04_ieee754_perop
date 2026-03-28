@@ -9,9 +9,8 @@ module {
       %1 = memref.load %arg2[%arg5] : memref<2xf32>
       %2 = memref.load %arg3[%arg5] : memref<2xf32>
       %3 = arith.addf %1, %2 : f32
-      %4 = arith.mulf %1, %2 : f32
-      %5 = arith.mulf %3, %4 : f32
-      memref.store %5, %arg4[%c0] : memref<2xf32>
+      %4 = arith.mulf %3, %1 : f32
+      memref.store %4, %arg4[%c0] : memref<2xf32>
     }
     %0 = memref.load %arg4[%c0] : memref<2xf32>
     return %0 : f32

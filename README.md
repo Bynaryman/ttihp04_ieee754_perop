@@ -68,9 +68,8 @@ scf.for %k = %c0 to %c2 step %c1 {
   %x = memref.load %a[%k] : memref<2xf32>
   %y = memref.load %b[%k] : memref<2xf32>
   %sum_xy = arith.addf %x, %y : f32
-  %mul_xy = arith.mulf %x, %y : f32
-  %mul_mix = arith.mulf %sum_xy, %mul_xy : f32
-  memref.store %mul_mix, %c[%c0] : memref<2xf32>
+  %prod = arith.mulf %sum_xy, %x : f32
+  memref.store %prod, %c[%c0] : memref<2xf32>
 }
 ```
 
@@ -130,8 +129,8 @@ make -C test -B
 Test vectors in `test/test.py`:
 
 - `unit`: `a=[1.0, 0.0]`, `b=[1.0, 0.0]`, expected `0x00000000`
-- `mixed`: `a=[2.0, 1.0]`, `b=[0.5, 2.0]`, expected `0x40C00000`
-- `signed`: `a=[-1.0, 0.5]`, `b=[2.0, -4.0]`, expected `0x40E00000`
+- `mixed`: `a=[2.0, 1.0]`, `b=[0.5, 2.0]`, expected `0x40400000`
+- `signed`: `a=[-1.0, 0.5]`, `b=[2.0, -4.0]`, expected `0xBFE00000`
 
 ## Related material
 
